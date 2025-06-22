@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard - User Data Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    let userData = {{ user_data | safe }};
+  </script>
+</head>
+<body>
+
+  <div class="dashboard-box">
+    <h2>Welcome, {{ username }}</h2>
+    <a href="/logout">Logout</a>
+  </div>
+
+  <div class="container">
+    <h2>User Data Manager</h2>
+    <div class="input-group">
+      <input type="text" id="command" placeholder="Enter name or command (show / delete / update / open_<name>)">
+      <button class="btn" onclick="processCommand()">Submit</button>
+    </div>
+
+    <div id="extraInputs">
+      <input type="text" id="age" placeholder="Enter age">
+      <input type="text" id="city" placeholder="Enter city">
+      <input type="text" id="email" placeholder="Enter email">
+      <input type="text" id="bankAccount" placeholder="Enter bank account number">
+      <input type="text" id="amount" placeholder="Enter amount (e.g., 1000.00)">
+      <input type="text" id="phone" placeholder="Enter phone number">
+      <input type="text" id="occupation" placeholder="Enter occupation">
+    </div>
+
+    <div id="terminalInput">
+      <div class="terminal-prompt">
+        <span id="terminalPromptText"></span>
+      </div>
+      <div class="terminal-input-group">
+        <input type="text" class="terminal-input" id="terminalInputField" placeholder="Enter value">
+        <button class="terminal-btn" onclick="submitTerminalInput()">Submit</button>
+        <button class="terminal-btn cancel" onclick="cancelTerminalInput()">Cancel</button>
+      </div>
+    </div>
+
+    <div class="result" id="output"></div>
+  </div>
+
+  <script>
+    let currentAction = null;
+    let currentFieldIndex = 0;
+    let updateData = {};
+    let resolveTerminal = null;
+
+    function saveData() {
+      fetch('/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData)
+      });
+    }
+
+    function showTerminalInput(promptText, action) {
+      return new Promise((resolve) => {
+        resolveTerminal = resolve;
+        currentAction = action;
+        document.getElementById("extraInputs").style.display = "none";
+        document.getElementById("terminalInput").style.display = "block";
+        document.getElementById("terminalPromptText").textContent = promptText;
+        document.getElementById("terminalInputField").value = "";
+        document.getElementById("terminalInputField").focus();
+      });
+    }
+
+    function hideTerminalInput() {
+      document.getElementById("terminalInput").style.display = "none";
+      resolveTerminal = null;
+      currentAction = null;
+      currentFieldIndex = 0;
+      updateData = {};
+    }
+
+    function submitTerminalInput() {
+      const input = document.getElementById("terminalInputField").value.trim();
+      if (resolveTerminal) {
+        resolveTerminal(input || null);
+      }
+    }
+
+    function cancelTerminalInput() {
+      hideTerminalInput();
+      resolveTerminal(null);
+    }
+
+    document.getElementById("terminalInputField").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        submitTerminalInput();
+      }
+    });
+
+    async function updateUser(name) {
+      if (!userData[name]) return null;
+      const fields = [
+        { id: "age", label: "Age", default: userData[name].age },
+        { id: "city", label: "City", default: userData[name].city },
+        { id: "email", label: "Email", default: userData[name].email },
+        { id: "bankAccount", label: "Bank Account", default: userData[name].bankAccount },
+        { id: "amount", label: "Amount", default: userData[name].amount },
+        { id: "phone", label: "Phone", default: userData[name].phone },
+        { id: "occupation", label: "Occupation", default: userData[name].occupation },
+      ];
+      updateData = {};
+      for (let i = 0; i < fields.length; i++) {
+        currentFieldIndex = i;
+        const field = fields[i];
+        const value = await showTerminalInput(`Enter ${field.label} [${field.default}]:`, "update_field");
+        if (value === null) return null; // Cancelled
+        updateData[field.id] = value || field.default;
+      }
+      return updateData;
+    }
+
+    async function processCommand() {
+      const btn = document.querySelector('.btn');
+      btn.classList.add('loading');
+      const command = document.getElementById("command").value.trim();
+      const output = document.getElementById("output");
+      const extraInputs = document.getElementById("extraInputs");
+      const terminalInput = document.getElementById("terminalInput");
+      output.innerText = "";
+      output.classList.remove('success', 'error', 'profile');
+      extraInputs.style.display = "none";
+      terminalInput.style.display = "none";
+
+      setTimeout(async () => {
+        if (!command) {
+          output.innerText = "⚠️ Please enter a valid name or command.";
+          output.classList.add('error');
+          btn.classList.remove('loading');
+          return;
+        }
+
+        if (command.toLowerCase() === "show") {
+  const names = Object.keys(userData).filter(key => key !== "password");
+  if (names.length === 0) {
+    output.innerText = "No users found.";
+    output.classList.add('error');
+  } else {
+    output.innerText = "--- List of Entries ---\n" + names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+    output.classList.add('success');
+  }
+
+
+        } else if (command.toLowerCase() === "delete") {
+          const name = await showTerminalInput("Enter the name you want to delete:", "delete");
+          if (name && userData[name]) {
+            delete userData[name];
+            saveData();
+            output.innerText = `'${name}' has been deleted.`;
+            output.classList.add('success');
+          } else if (name) {
+            output.innerText = `No such name '${name}' found.`;
+            output.classList.add('error');
+          }
+          hideTerminalInput();
+
+        } else if (command.toLowerCase() === "update") {
+          const name = await showTerminalInput("Enter the name you want to update:", "update");
+          if (name && userData[name]) {
+            const updatedData = await updateUser(name);
+            if (updatedData) {
+              userData[name] = updatedData;
+              saveData();
+              output.innerText = `${name}'s details updated.`;
+              output.classList.add('success');
+            }
+          } else if (name) {
+            output.innerText = `No such user '${name}' found.`;
+            output.classList.add('error');
+          }
+          hideTerminalInput();
+
+        } else if (command.toLowerCase().startsWith("open_")) {
+          const name = command.substring(5);
+          if (userData[name]) {
+            const info = userData[name];
+            output.classList.add('profile', 'success');
+            output.innerHTML = `
+              <div class="profile-title">${name}'s Profile</div>
+              <div class="profile-item"><span class="label">Age:</span><span class="value">${info.age}</span></div>
+              <div class="profile-item"><span class="label">City:</span><span class="value">${info.city}</span></div>
+              <div class="profile-item"><span class="label">Email:</span><span class="value">${info.email}</span></div>
+              <div class="profile-item"><span class="label">Bank Account:</span><span class="value">${info.bankAccount}</span></div>
+              <div class="profile-item"><span class="label">Amount:</span><span class="value">${info.amount}</span></div>
+              <div class="profile-item"><span class="label">Phone:</span><span class="value">${info.phone}</span></div>
+              <div class="profile-item"><span class="label">Occupation:</span><span class="value">${info.occupation}</span></div>
+            `;
+          } else {
+            output.innerText = `No such user '${name}' found.`;
+            output.classList.add('error');
+          }
+
+        } else if (userData[command]) {
+          output.innerText = "⚠️ Name already taken. Please try a different one.";
+          output.classList.add('error');
+        } else {
+          extraInputs.style.display = "grid";
+          const age = document.getElementById("age").value.trim();
+          const city = document.getElementById("city").value.trim();
+          const email = document.getElementById("email").value.trim();
+          const bankAccount = document.getElementById("bankAccount").value.trim();
+          const amount = document.getElementById("amount").value.trim();
+          const phone = document.getElementById("phone").value.trim();
+          const occupation = document.getElementById("occupation").value.trim();
+
+          if (!age || !city || !email || !bankAccount || !amount || !phone || !occupation) {
+            output.innerText = "ℹ️ Please fill all fields.";
+            output.classList.add('error');
+            btn.classList.remove('loading');
+            return;
+          }
+
+          userData[command] = { age, city, email, bankAccount, amount, phone, occupation };
+          saveData();
+          output.innerText = `Hello ${command}, your details have been saved.`;
+          output.classList.add('success');
+
+          document.getElementById("age").value = "";
+          document.getElementById("city").value = "";
+          document.getElementById("email").value = "";
+          document.getElementById("bankAccount").value = "";
+          document.getElementById("amount").value = "";
+          document.getElementById("phone").value = "";
+          document.getElementById("occupation").value = "";
+        }
+
+        document.getElementById("command").value = "";
+        btn.classList.remove('loading');
+      }, 500);
+    }
+  </script>
+</body>
+</html>
